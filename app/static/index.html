@@ -324,6 +324,20 @@ function clearAll() {
 }
 
 /* ---------- rendering ---------- */
+/* Clipboard: navigator.clipboard only exists on https or localhost, so a plain-http Droplet needs the old route. */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through to the legacy route */ }
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.append(ta); ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
 function md(text) { return DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true })); }
 
 function render() {
@@ -415,7 +429,11 @@ function card(run, id) {
   if (st === "success") {
     const pick = el("button", { text: run.picked === id ? "Preferred" : "Prefer this one", "aria-pressed": String(run.picked === id) });
     pick.addEventListener("click", () => prefer(run, id));
-    const copy = button("Copy", async () => { try { await navigator.clipboard.writeText(r.text); copy.textContent = "Copied"; setTimeout(() => (copy.textContent = "Copy"), 1200); } catch { /* clipboard blocked */ } });
+    const copy = button("Copy", async () => {
+      const ok = await copyText(r.text);
+      copy.textContent = ok ? "Copied" : "Copy failed: select the text instead";
+      setTimeout(() => (copy.textContent = "Copy"), ok ? 1200 : 3000);
+    });
     c.append(el("div", { class: "cardfoot" }, pick, copy));
   }
   return c;
