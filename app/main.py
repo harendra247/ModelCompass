@@ -177,16 +177,22 @@ def create_app(settings: Settings | None = None, registry: Registry | None = Non
         reg = active_models()
         sid = registry.summary_model if not settings.mock_mode else "mock-balanced"
         cfg = reg[sid]
-        blocks = "\n\n".join(f"### Response {i + 1} ({r.model})\n{r.text[:4000]}" for i, r in enumerate(req.results))
+        blocks = "\n\n".join(f"### Response {i + 1} ({r.model})\n{r.text[:8000]}" for i, r in enumerate(req.results))
         system = ("You compare several AI answers to the same prompt. Report only: (1) points all answers agree on, "
                   "(2) meaningful differences in content, approach or tone, (3) any claims that conflict or look doubtful. "
                   "Be concise, use short bullets, refer to responses by number. Do not name a winner.")
         out = await run_to_text(cfg, gateway, settings, system, f"Prompt:\n{req.prompt[:4000]}\n\n{blocks}",
-                                {"temperature": 0.2, "max_tokens": 500}, "sum_" + uuid.uuid4().hex[:8])
+                                {"temperature": 0.2, "max_tokens": min(1500, settings.max_output_tokens_cap)},
+                                "sum_" + uuid.uuid4().hex[:8])
         if out.get("status") != "success":
             return _err(502, "summary_failed", out.get("error") or "Summary failed.")
         limiter.add_spend(out.get("est_cost_usd"))
-        return {"summary": out["text"], "model": sid, "est_cost_usd": out.get("est_cost_usd"), "generated_by_model": True}
+        # a reasoning model can spend the whole budget thinking: tell the UI instead of showing a clipped answer as complete
+        truncated = out.get("finish_reason") == "length"
+        if not out["text"].strip():
+            return _err(502, "summary_failed", "The summary model used its whole token budget before writing an answer. Try again.")
+        return {"summary": out["text"], "model": sid, "est_cost_usd": out.get("est_cost_usd"), "generated_by_model": True,
+                "truncated": truncated}
 
     @app.post("/api/v1/preference", status_code=204)
     async def preference(req: PreferenceReq):

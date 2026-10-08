@@ -386,7 +386,8 @@ function summaryBox(s) {
   const box = el("div", { class: "summary" }, el("h3", { text: "Where the answers agree and differ (written by a model, not a verdict)" }));
   if (s.loading) box.append(el("div", { class: "waiting", text: "Summarising..." }));
   else if (s.error) box.append(el("div", { class: "errmsg", text: s.error }));
-  else { const d = el("div", { class: "md body", style: "padding:0;min-height:0;max-height:none" }); d.innerHTML = md(s.summary); box.append(d); }
+  else { const d = el("div", { class: "md body", style: "padding:0;min-height:0;max-height:none" }); d.innerHTML = md(s.summary); box.append(d);
+    if (s.truncated) box.append(el("div", { class: "hint", text: "This summary was cut off at its token limit. Run it again, or compare fewer or shorter answers." })); }
   return box;
 }
 

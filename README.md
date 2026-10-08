@@ -16,7 +16,7 @@ streaming, per-model failure, timeouts, cost, limits, Stop, Run again, export, t
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest -q                        # 42 tests, about 7 s, no network, no key
+.venv/bin/python -m pytest -q                        # 43 tests, about 7 s, no network, no key
 .venv/bin/uvicorn app.main:app --port 8080           # open http://localhost:8080
 ```
 
@@ -137,5 +137,5 @@ app/config.py    settings and model registry
 app/models.json  allowlist, prices, as-of date
 app/static/      single-page UI (served by the same container)
 Dockerfile, docker-compose.yml, .env.example, .gitignore, .dockerignore, .do/app.yaml
-tests/           42 tests: parallelism, isolation, timeouts, cancellation, adapter parsing, limits
+tests/           43 tests: parallelism, isolation, timeouts, cancellation, adapter parsing, limits
 ```

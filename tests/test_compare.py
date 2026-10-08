@@ -325,6 +325,7 @@ def test_summary_endpoint_and_preference_marker():
     c, _ = client()
     r = c.post("/api/v1/summarize", json={"prompt": "p", "results": [{"model": "a", "text": "x"}, {"model": "b", "text": "y"}]})
     assert r.status_code == 200 and r.json()["generated_by_model"] is True and r.json()["summary"]
+    assert r.json()["truncated"] is False
     assert c.post("/api/v1/preference", json={"request_id": "cmp_1", "model": "mock-fast"}).status_code == 204
     assert c.app.state.picks["mock-fast"] == 1
 
@@ -474,3 +475,21 @@ def test_finish_reason_length_is_reported_so_the_ui_can_say_the_answer_was_cut_o
                                                  {"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 800}}))
 
     assert by_model(asyncio.run(run_live(handler)), "done")[0]["finish_reason"] == "length"
+
+
+def test_summary_gets_room_and_reports_truncation():
+    seen = {}
+    s = settings(mock_speed=25)
+    gw = Gateway(s)
+    orig = gw.stream
+
+    async def cut(cfg, system, prompt, params):
+        seen.update(params)
+        async for ch in orig(cfg, system, prompt, params):
+            yield {"type": "finish", "reason": "length"} if ch["type"] == "finish" else ch
+
+    gw.stream = cut
+    c = TestClient(create_app(s, Registry(), gw, Limiter(s)))
+    r = c.post("/api/v1/summarize", json={"prompt": "p", "results": [{"model": "a", "text": "x"}, {"model": "b", "text": "y"}]})
+    assert seen["max_tokens"] >= 1500          # was 500: reasoning models spent it all thinking
+    assert r.status_code == 200 and r.json()["truncated"] is True
