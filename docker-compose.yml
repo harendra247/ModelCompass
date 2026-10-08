@@ -1,0 +1,35 @@
+# docker compose up --build        -> http://localhost:8080
+# With no key set the app runs in demo mode (simulated models).
+# With a key:  DO_MODEL_ACCESS_KEY=... docker compose up --build   (or put it in .env)
+services:
+  app:
+    build: .
+    image: model-compare:local
+    ports:
+      - "8080:8080"
+    environment:
+      DO_MODEL_ACCESS_KEY: ${DO_MODEL_ACCESS_KEY:-}
+      MOCK_MODE: ${MOCK_MODE:-0}
+      COMPARES_PER_HOUR: ${COMPARES_PER_HOUR:-10}
+      CONCURRENT_PER_IP: ${CONCURRENT_PER_IP:-2}
+      DAILY_SPEND_CEILING_USD: ${DAILY_SPEND_CEILING_USD:-5}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  # Development: live code reload, tests run inside the same image.
+  # docker compose --profile dev up dev
+  dev:
+    profiles: ["dev"]
+    build: .
+    ports:
+      - "8081:8080"
+    environment:
+      DO_MODEL_ACCESS_KEY: ${DO_MODEL_ACCESS_KEY:-}
+      MOCK_MODE: ${MOCK_MODE:-1}
+    volumes:
+      - ./app:/srv/app
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]

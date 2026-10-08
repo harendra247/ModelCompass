@@ -1,0 +1,43 @@
+# Ignore version control metadata
+.git
+.gitignore
+.gitattributes
+
+# Ignore documentation and CI/CD configurations
+.github
+.gitlab-ci.yml
+README.md
+LICENSE
+docs/
+
+# Ignore local dependencies (let Docker run npm install / pip install inside the container)
+node_modules/
+venv/
+.venv/
+env/
+
+# Ignore local build outputs and caches
+dist/
+build/
+.next/
+.cache/
+.npm/
+
+# Ignore secrets and environment configs (inject these via environment variables instead)
+.env
+.env.*
+*.key
+*.pem
+
+# Ignore Docker configurations themselves to prevent layer cache busts
+Dockerfile
+Dockerfile.*
+.dockerignore
+.gcloudignore
+
+# Ignore editor logs and system junk
+.vscode/
+.idea/
+*.log
+.DS_Store
+

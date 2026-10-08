@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model Compare</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --panel:#fff; --ink:#1b2430; --muted:#5b6675; --line:#dfe3e8; --accent:#0069ff; --accent-ink:#fff;
+    --ok:#127a43; --ok-bg:#e4f5ec; --err:#b42318; --err-bg:#fdeceb; --warn:#8a5a00; --warn-bg:#fff3d6; --run:#0b5ed7; --run-bg:#e6f0ff;
+    --code:#f1f3f6; --pick:#0069ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12161c; --panel:#1b2129; --ink:#e8ecf1; --muted:#9aa5b4; --line:#2e3744; --accent:#4d94ff; --accent-ink:#06101f;
+      --ok:#5dd39e; --ok-bg:#12301f; --err:#ff8a80; --err-bg:#3a1a18; --warn:#f2c460; --warn-bg:#3a2e12; --run:#8ab8ff; --run-bg:#14284a; --code:#232b36; --pick:#4d94ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:1280px; margin:0 auto; padding:20px 16px 48px; }
+  header { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 16px; margin-bottom:14px; }
+  h1 { font-size:22px; margin:0; letter-spacing:-.01em; }
+  .sub { color:var(--muted); }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+  .badge.demo { background:var(--warn-bg); color:var(--warn); }
+  .badge.live { background:var(--ok-bg); color:var(--ok); }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  label.f { display:block; font-weight:600; margin:0 0 4px; }
+  textarea, input[type=number] { width:100%; font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; }
+  textarea { resize:vertical; min-height:96px; }
+  textarea:focus-visible, input:focus-visible, button:focus-visible, summary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .row { display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; }
+  .hint { color:var(--muted); font-size:13px; }
+  details.sys { margin:10px 0 0; }
+  details.sys summary { cursor:pointer; color:var(--muted); font-size:14px; }
+  .models { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:8px; margin:6px 0 4px; }
+  .chip { display:flex; gap:8px; align-items:flex-start; border:1px solid var(--line); border-radius:8px; padding:8px 10px; cursor:pointer; background:var(--bg); }
+  .chip:has(input:checked) { border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+  .chip input { margin-top:4px; }
+  .chip .n { font-weight:600; font-size:14px; }
+  .chip .p { color:var(--muted); font-size:12px; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:12px; }
+  button { font:inherit; border-radius:8px; border:1px solid var(--line); background:var(--panel); color:var(--ink); padding:8px 14px; cursor:pointer; }
+  button.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .notice { margin-top:12px; padding:10px 12px; border-radius:8px; background:var(--err-bg); color:var(--err); display:none; }
+  .notice.show { display:block; }
+  .tabs { display:flex; gap:6px; flex-wrap:wrap; margin:18px 0 8px; align-items:center; }
+  .tab { padding:5px 12px; border-radius:999px; font-size:13px; }
+  .tab[aria-selected=true] { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .strip { display:flex; flex-wrap:wrap; gap:8px 22px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--panel); margin:0 0 12px; }
+  .strip .k { color:var(--muted); font-size:12px; display:block; }
+  .strip .v { font-weight:600; }
+  .note { font-size:13px; color:var(--muted); margin:0 0 12px; }
+  .variance { margin:0 0 12px; font-size:13px; }
+  .variance table { border-collapse:collapse; }
+  .variance td, .variance th { padding:3px 12px 3px 0; text-align:left; font-weight:normal; }
+  .variance th { color:var(--muted); }
+  .summary { border:1px solid var(--line); border-left:4px solid var(--warn); background:var(--panel); border-radius:10px; padding:12px 14px; margin:0 0 12px; }
+  .summary h3 { margin:0 0 4px; font-size:14px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:12px; align-items:start; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; display:flex; flex-direction:column; min-width:0; }
+  .card.picked { border-color:var(--pick); box-shadow:0 0 0 2px var(--pick); }
+  .card header { margin:0; padding:10px 12px; border-bottom:1px solid var(--line); justify-content:space-between; align-items:center; }
+  .card h2 { font-size:15px; margin:0; }
+  .card .prov { color:var(--muted); font-size:12px; }
+  .st { font-size:12px; font-weight:600; padding:2px 8px; border-radius:999px; }
+  .st.pending,.st.running,.st.thinking { background:var(--run-bg); color:var(--run); }
+  .st.success { background:var(--ok-bg); color:var(--ok); }
+  .st.error { background:var(--err-bg); color:var(--err); }
+  .st.timeout,.st.rate_limited,.st.stopped { background:var(--warn-bg); color:var(--warn); }
+  .body { padding:12px; min-height:140px; max-height:520px; overflow:auto; overflow-wrap:anywhere; }
+  .body.md > :first-child { margin-top:0; } .body.md > :last-child { margin-bottom:0; }
+  .body pre { background:var(--code); padding:10px; border-radius:8px; overflow:auto; font-size:13px; }
+  .body code { background:var(--code); padding:1px 4px; border-radius:4px; font-size:.92em; }
+  .body pre code { background:none; padding:0; }
+  .errmsg { color:var(--err); font-size:13px; margin-bottom:8px; }
+  .waiting { color:var(--muted); font-style:italic; }
+  .metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:6px 10px; padding:10px 12px; border-top:1px solid var(--line); font-size:13px; }
+  .metrics .k { color:var(--muted); font-size:11px; display:block; text-transform:uppercase; letter-spacing:.03em; }
+  .cardfoot { display:flex; gap:8px; padding:8px 12px 12px; }
+  footer { margin-top:28px; color:var(--muted); font-size:13px; }
+  .empty { text-align:center; color:var(--muted); padding:36px 12px; border:1px dashed var(--line); border-radius:10px; }
+  @media (max-width: 560px) { .actions button { flex:1 1 auto; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Model Compare</h1>
+    <span class="sub">One prompt, several DigitalOcean-hosted models, one view.</span>
+    <span id="mode" class="badge"></span>
+  </header>
+
+  <section class="panel" aria-label="Compare form">
+    <label class="f" for="prompt">Prompt</label>
+    <textarea id="prompt" placeholder="Explain Kubernetes to a developer who knows Docker"></textarea>
+    <div class="hint"><span id="count">0</span> / <span id="maxchars">8000</span> characters</div>
+    <details class="sys">
+      <summary>System prompt and parameters (optional)</summary>
+      <label class="f" for="system" style="margin-top:8px">System prompt</label>
+      <textarea id="system" style="min-height:60px" placeholder="You are a concise senior engineer."></textarea>
+      <div class="row" style="margin-top:10px">
+        <div><label class="f" for="temp">Temperature</label><input id="temp" type="number" min="0" max="2" step="0.1" value="0.7" style="width:110px"></div>
+        <div><label class="f" for="maxtok">Max output tokens</label><input id="maxtok" type="number" min="16" step="50" value="800" style="width:130px"></div>
+        <div class="hint">Same values go to every model. Some models clamp or ignore them.</div>
+      </div>
+    </details>
+
+    <label class="f" style="margin-top:14px">Models <span class="hint" id="modelhint"></span></label>
+    <div id="models" class="models" role="group" aria-label="Models"></div>
+
+    <label class="hint" style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <input type="checkbox" id="diffs"> Add a "where they agree and differ" summary (one extra model call, written by a model, not a verdict)
+    </label>
+
+    <div class="actions">
+      <button id="go" class="primary">Compare</button>
+      <button id="stop" disabled>Stop</button>
+      <button id="again" disabled>Run again</button>
+      <button id="clear">Clear</button>
+      <span id="reason" class="hint" aria-live="polite"></span>
+    </div>
+    <div id="notice" class="notice" role="alert"></div>
+  </section>
+
+  <div id="tabs" class="tabs" role="tablist" aria-label="Runs"></div>
+  <div id="out"><div class="empty">Pick 2 to 4 models, enter a prompt and press Compare.</div></div>
+
+  <footer>
+    Prompts are sent to DigitalOcean serverless inference to get answers. This app does not store them; server logs keep only model names, timings, token counts and status.
+    Costs are estimates from a price table dated <span id="asof">-</span>. Token counts come from each model's own tokenizer, so they are not directly comparable. One run is one sample: outputs vary, so use Run again.
+  </footer>
+</div>
+
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const state = { cfg: null, models: {}, runs: [], current: -1, abort: null, running: false };
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable: fine */ } },
+};
+
+const fmtMs = (ms) => ms == null ? "-" : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`;
+const fmtCost = (c) => c == null ? "n/a" : c < 0.0001 ? "<$0.0001" : `$${c.toFixed(4)}`;
+const fmtTok = (n, approx) => n == null ? "-" : `${approx ? "~" : ""}${n}`;
+const label = (id) => (state.models[id] && state.models[id].label) || id;
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k === "text") e.textContent = v; else e.setAttribute(k, v);
+  }
+  kids.flat().forEach((c) => c != null && e.append(c));
+  return e;
+}
+
+/* ---------- setup ---------- */
+async function init() {
+  const r = await fetch("/api/v1/models");
+  state.cfg = await r.json();
+  state.cfg.models.forEach((m) => (state.models[m.id] = m));
+  const mode = $("mode");
+  mode.textContent = state.cfg.mode === "mock" ? "Demo mode: simulated models" : "Live: DigitalOcean inference";
+  mode.className = "badge " + (state.cfg.mode === "mock" ? "demo" : "live");
+  if (state.cfg.catalog_verified === false) mode.textContent += " (model list not verified)";
+  $("asof").textContent = state.cfg.pricing_as_of;
+  $("maxchars").textContent = state.cfg.limits.max_prompt_chars;
+  $("prompt").maxLength = state.cfg.limits.max_prompt_chars;
+  $("maxtok").max = state.cfg.limits.max_output_tokens;
+  $("modelhint").textContent = `(choose ${state.cfg.limits.min_models} to ${state.cfg.limits.max_models})`;
+
+  let saved = null;
+  try { saved = JSON.parse(store.get("selected") || "null"); } catch { saved = null; }
+  const initial = new Set((saved || []).filter((id) => state.models[id]).length >= 2 ? saved : state.cfg.defaults);
+  const box = $("models");
+  state.cfg.models.forEach((m) => {
+    const price = m.input_per_m == null ? "price n/a" : `$${m.input_per_m}/$${m.output_per_m} per 1M tokens (in/out)`;
+    const cb = el("input", { type: "checkbox", value: m.id });
+    cb.checked = initial.has(m.id);
+    cb.addEventListener("change", onSelect);
+    box.append(el("label", { class: "chip" }, cb,
+      el("span", {}, el("span", { class: "n", text: m.label }), el("br"), el("span", { class: "p", text: `${m.provider} · ${price}` }))));
+  });
+  $("prompt").addEventListener("input", refresh);
+  $("go").addEventListener("click", () => start(readForm()));
+  $("again").addEventListener("click", () => { const r = state.runs[state.current]; if (r) start(r.inputs); });
+  $("stop").addEventListener("click", stop);
+  $("clear").addEventListener("click", clearAll);
+  $("diffs").addEventListener("change", () => store.set("diffs", $("diffs").checked ? "1" : "0"));
+  $("diffs").checked = store.get("diffs") === "1";
+  refresh();
+}
+
+function selected() { return [...document.querySelectorAll("#models input:checked")].map((i) => i.value); }
+function onSelect(e) {
+  const sel = selected();
+  if (sel.length > state.cfg.limits.max_models) { e.target.checked = false; }
+  store.set("selected", JSON.stringify(selected()));
+  refresh();
+}
+function reasonDisabled() {
+  const n = selected().length, L = state.cfg.limits;
+  if (!$("prompt").value.trim()) return "Enter a prompt.";
+  if (n < L.min_models) return `Select at least ${L.min_models} models.`;
+  if (n > L.max_models) return `Select at most ${L.max_models} models.`;
+  return "";
+}
+function refresh() {
+  $("count").textContent = $("prompt").value.length;
+  const why = reasonDisabled();
+  $("go").disabled = state.running || !!why;
+  $("reason").textContent = state.running ? "" : why;
+  // the 4-model cap: grey out the rest once 4 are chosen
+  const full = selected().length >= state.cfg.limits.max_models;
+  document.querySelectorAll("#models input").forEach((i) => (i.disabled = full && !i.checked));
+  $("stop").disabled = !state.running;
+  $("again").disabled = state.running || state.current < 0;
+}
+function readForm() {
+  return {
+    prompt: $("prompt").value.trim(), system: $("system").value.trim() || null, models: selected(),
+    parameters: { temperature: Number($("temp").value), max_tokens: Number($("maxtok").value) },
+    diffs: $("diffs").checked,
+  };
+}
+function notice(msg) { const n = $("notice"); n.textContent = msg || ""; n.classList.toggle("show", !!msg); }
+
+/* ---------- running a comparison ---------- */
+async function start(inputs) {
+  if (state.running) return;
+  notice("");
+  const run = { n: state.runs.length + 1, inputs, request_id: null, results: {}, picked: null, summary: null, status: "running" };
+  inputs.models.forEach((m) => (run.results[m] = { status: "pending", text: "" }));
+  state.runs.push(run); state.current = state.runs.length - 1;
+  state.running = true; state.abort = new AbortController(); refresh(); render();
+  try {
+    const res = await fetch("/api/v1/compare", {
+      method: "POST", headers: { "Content-Type": "application/json" }, signal: state.abort.signal,
+      body: JSON.stringify({ prompt: inputs.prompt, system: inputs.system, models: inputs.models, parameters: inputs.parameters }),
+    });
+    if (!res.ok) {
+      let msg = `Request failed (${res.status}).`;
+      try { msg = (await res.json()).error.message || msg; } catch { /* keep default */ }
+      state.runs.pop(); state.current = state.runs.length - 1;
+      notice(msg); return;
+    }
+    await readStream(res, run);
+    run.status = "done";
+    if (inputs.diffs) await loadSummary(run);
+  } catch (e) {
+    if (e.name === "AbortError") {
+      run.status = "stopped";
+      Object.values(run.results).forEach((r) => { if (["pending", "running", "thinking"].includes(r.status)) r.status = "stopped"; });
+    } else {
+      run.status = "error";
+      Object.values(run.results).forEach((r) => { if (["pending", "running", "thinking"].includes(r.status)) { r.status = "error"; r.error = "Connection lost"; } });
+      notice("Connection lost while streaming. Partial results are kept.");
+    }
+  } finally {
+    state.running = false; state.abort = null; refresh(); render();
+  }
+}
+
+async function readStream(res, run) {
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      const m = /^event: (.+)\ndata: (.+)$/s.exec(block);
+      if (m) apply(run, m[1], JSON.parse(m[2]));
+    }
+  }
+}
+
+let raf = 0;
+function apply(run, name, d) {
+  const r = d.model ? run.results[d.model] : null;
+  if (name === "start") run.request_id = d.request_id;
+  else if (name === "status" && r) r.status = d.status;
+  else if (name === "delta" && r) { r.text += d.text; if (r.status === "pending" || r.status === "thinking") r.status = "running"; }
+  else if ((name === "done" || name === "error") && r) Object.assign(r, d);
+  if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(); });
+}
+
+function stop() { if (state.abort) state.abort.abort(); }
+
+async function loadSummary(run) {
+  const ok = Object.entries(run.results).filter(([, r]) => r.status === "success" && r.text);
+  if (ok.length < 2) return;
+  run.summary = { loading: true }; render();
+  try {
+    const res = await fetch("/api/v1/summarize", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: run.inputs.prompt, results: ok.map(([m, r]) => ({ model: label(m), text: r.text })) }) });
+    const j = await res.json();
+    run.summary = res.ok ? j : { error: (j.error && j.error.message) || "Summary failed." };
+  } catch { run.summary = { error: "Summary failed." }; }
+}
+
+function prefer(run, model) {
+  run.picked = model; render();
+  if (run.request_id) fetch("/api/v1/preference", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ request_id: run.request_id, model }) }).catch(() => {});
+}
+
+function clearAll() {
+  stop(); state.runs = []; state.current = -1; notice(""); render(); refresh();
+}
+
+/* ---------- rendering ---------- */
+function md(text) { return DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true })); }
+
+function render() {
+  const tabs = $("tabs"), out = $("out");
+  tabs.replaceChildren();
+  if (!state.runs.length) { out.replaceChildren(el("div", { class: "empty", text: "Pick 2 to 4 models, enter a prompt and press Compare." })); return; }
+  state.runs.forEach((r, i) => {
+    const t = el("button", { class: "tab", role: "tab", "aria-selected": String(i === state.current), text: `Run ${r.n}` });
+    t.addEventListener("click", () => { state.current = i; refresh(); render(); });
+    tabs.append(t);
+  });
+  const exp = el("span", { style: "margin-left:auto;display:flex;gap:6px" },
+    button("Export JSON", () => exportJSON()), button("Export Markdown", () => exportMD()));
+  tabs.append(exp);
+
+  const run = state.runs[state.current];
+  const kids = [];
+  const strip = headline(run); if (strip) kids.push(strip);
+  const v = variance(); if (v) kids.push(v);
+  if (run.summary) kids.push(summaryBox(run.summary));
+  const grid = el("div", { class: "grid" });
+  run.inputs.models.forEach((id) => grid.append(card(run, id)));
+  kids.push(grid);
+  out.replaceChildren(...kids);
+}
+
+function button(text, fn) { const b = el("button", { text }); b.addEventListener("click", fn); return b; }
+
+function headline(run) {
+  const ok = Object.entries(run.results).filter(([, r]) => r.status === "success");
+  if (ok.length < 2) return null;
+  const best = (key, dir = 1, filter = () => true) => {
+    const c = ok.filter(([, r]) => r[key] != null && filter(r));
+    return c.length ? c.reduce((a, b) => (dir * (b[1][key] - a[1][key]) < 0 ? b : a))[0] : null;
+  };
+  const items = [
+    ["Fastest to first token", best("ttft_ms"), (id) => fmtMs(run.results[id].ttft_ms)],
+    ["Fastest to finish", best("latency_ms"), (id) => fmtMs(run.results[id].latency_ms)],
+    ["Cheapest (estimate)", best("est_cost_usd"), (id) => fmtCost(run.results[id].est_cost_usd)],
+    ["Longest answer", best("chars", -1), (id) => `${run.results[id].chars} chars`],
+  ].filter((x) => x[1]);
+  const s = el("div", { class: "strip", "aria-label": "Run headline" });
+  items.forEach(([k, id, f]) => s.append(el("div", {}, el("span", { class: "k", text: k }), el("span", { class: "v", text: `${label(id)} · ${f(id)}` }))));
+  return s;
+}
+
+function variance() {
+  const same = state.runs.filter((r) => r.inputs.prompt === state.runs[state.current].inputs.prompt && r.status !== "running");
+  if (same.length < 2) return null;
+  const ids = [...new Set(same.flatMap((r) => r.inputs.models))];
+  const t = el("table", {}, el("tr", {}, el("th", { text: "Finish time across runs" }), ...same.map((r) => el("th", { text: `Run ${r.n}` }))));
+  ids.forEach((id) => t.append(el("tr", {}, el("td", { text: label(id) }),
+    ...same.map((r) => el("td", { text: r.results[id] && r.results[id].status === "success" ? fmtMs(r.results[id].latency_ms) : "-" })))));
+  return el("div", { class: "variance panel" }, el("div", { class: "hint", text: "Same prompt, repeated: the spread is how much a single run can mislead." }), t);
+}
+
+function summaryBox(s) {
+  const box = el("div", { class: "summary" }, el("h3", { text: "Where the answers agree and differ (written by a model, not a verdict)" }));
+  if (s.loading) box.append(el("div", { class: "waiting", text: "Summarising..." }));
+  else if (s.error) box.append(el("div", { class: "errmsg", text: s.error }));
+  else { const d = el("div", { class: "md body", style: "padding:0;min-height:0;max-height:none" }); d.innerHTML = md(s.summary); box.append(d); }
+  return box;
+}
+
+function card(run, id) {
+  const r = run.results[id], st = r.status;
+  const c = el("article", { class: "card" + (run.picked === id ? " picked" : "") });
+  const names = el("div", {}, el("h2", { text: label(id) }), el("div", { class: "prov", text: (state.models[id] || {}).provider || "" }));
+  c.append(el("header", {}, names, el("span", { class: "st " + st, text: st.replace("_", " ") })));
+  const body = el("div", { class: "body md" });
+  if (r.error) body.append(el("div", { class: "errmsg", text: r.error }));
+  if (r.text) { const d = document.createElement("div"); d.innerHTML = md(r.text); body.append(d); }
+  else if (!r.error) body.append(el("div", { class: "waiting", text: st === "thinking" ? "Thinking..." : st === "stopped" ? "Stopped." : "Waiting for the first token..." }));
+  c.append(body);
+  const done = st === "success" || (r.latency_ms != null && st !== "pending");
+  if (done) {
+    const m = el("div", { class: "metrics" });
+    [["Finish", fmtMs(r.latency_ms)], ["First token", fmtMs(r.ttft_ms)],
+     ["Input tokens", fmtTok(r.input_tokens, r.tokens_approximate)], ["Output tokens", fmtTok(r.output_tokens, r.tokens_approximate)],
+     ["Est. cost", fmtCost(r.est_cost_usd)]].forEach(([k, v]) => m.append(el("div", {}, el("span", { class: "k", text: k }), el("span", { text: v }))));
+    c.append(m);
+  }
+  if (st === "success") {
+    const pick = el("button", { text: run.picked === id ? "Preferred" : "Prefer this one", "aria-pressed": String(run.picked === id) });
+    pick.addEventListener("click", () => prefer(run, id));
+    const copy = button("Copy", async () => { try { await navigator.clipboard.writeText(r.text); copy.textContent = "Copied"; setTimeout(() => (copy.textContent = "Copy"), 1200); } catch { /* clipboard blocked */ } });
+    c.append(el("div", { class: "cardfoot" }, pick, copy));
+  }
+  return c;
+}
+
+/* ---------- export (client side, nothing is stored) ---------- */
+function download(name, text, type) {
+  const a = el("a", { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  document.body.append(a); a.click(); a.remove();
+}
+function exportJSON() {
+  download("comparison.json", JSON.stringify({ exported_at: new Date().toISOString(), pricing_as_of: state.cfg.pricing_as_of,
+    runs: state.runs.map((r) => ({ run: r.n, request_id: r.request_id, inputs: r.inputs, preferred: r.picked, summary: r.summary && r.summary.summary, results: r.results })) }, null, 2), "application/json");
+}
+function exportMD() {
+  const lines = ["# Model comparison", `Prices as of ${state.cfg.pricing_as_of}; costs are estimates.`, ""];
+  state.runs.forEach((r) => {
+    lines.push(`## Run ${r.n}`, "", `**Prompt:** ${r.inputs.prompt}`, "");
+    r.inputs.models.forEach((id) => {
+      const x = r.results[id];
+      lines.push(`### ${label(id)}${r.picked === id ? " (preferred)" : ""}`,
+        `Status: ${x.status}${x.error ? ` (${x.error})` : ""} · finish ${fmtMs(x.latency_ms)} · first token ${fmtMs(x.ttft_ms)} · tokens ${fmtTok(x.input_tokens, x.tokens_approximate)} in / ${fmtTok(x.output_tokens, x.tokens_approximate)} out · est. ${fmtCost(x.est_cost_usd)}`, "", x.text || "", "");
+    });
+    if (r.summary && r.summary.summary) lines.push("### Differences summary (model-generated)", "", r.summary.summary, "");
+  });
+  download("comparison.md", lines.join("\n"), "text/markdown");
+}
+
+init().catch(() => notice("Could not load the model list. Reload to try again."));
+</script>
+</body>
+</html>

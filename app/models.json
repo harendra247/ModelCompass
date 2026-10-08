@@ -1,0 +1,26 @@
+{
+  "_comment": "Model IDs from docs.digitalocean.com/products/inference/details/models/ and prices (USD per 1M tokens, lowest prompt-length tier, standard processing) from docs.digitalocean.com/products/inference/details/pricing/. Both read 2026-10-08. Prices drift: re-check before relying on them. The model list shown to users is this allowlist intersected with GET /v1/models when a key is set.",
+  "pricing_as_of": "2026-10-08",
+  "pricing_source": "https://docs.digitalocean.com/products/inference/details/pricing/",
+  "default_models": ["openai-gpt-oss-120b", "deepseek-v4.1-flash", "llama-4-maverick"],
+  "summary_model": "openai-gpt-oss-120b",
+  "models": [
+    {"id": "openai-gpt-oss-120b", "label": "GPT-OSS 120B", "provider": "OpenAI", "context": 128000, "api": "chat", "input_per_m": 0.10, "output_per_m": 0.70},
+    {"id": "openai-gpt-5.6-luna", "label": "GPT-5.6 Luna", "provider": "OpenAI", "context": 1050000, "api": "chat", "input_per_m": 0.20, "output_per_m": 1.20, "max_tokens_param": "max_completion_tokens", "timeout_s": 60},
+    {"id": "anthropic-claude-haiku-4.5", "label": "Claude Haiku 4.5", "provider": "Anthropic", "context": 200000, "api": "chat", "input_per_m": 1.00, "output_per_m": 5.00},
+    {"id": "anthropic-claude-sonnet-5.5", "label": "Claude Sonnet 5.5", "provider": "Anthropic", "context": 1000000, "api": "chat", "input_per_m": 2.00, "output_per_m": 10.00},
+    {"id": "deepseek-v4.1-flash", "label": "DeepSeek V4.1 Flash", "provider": "DeepSeek", "context": 1048576, "api": "chat", "input_per_m": 0.30, "output_per_m": 1.20},
+    {"id": "deepseek-3.2", "label": "DeepSeek V3.2", "provider": "DeepSeek", "context": 163840, "api": "chat", "input_per_m": 0.50, "output_per_m": 1.60},
+    {"id": "llama-4-maverick", "label": "Llama 4 Maverick", "provider": "Meta", "context": 128000, "api": "chat", "input_per_m": 0.25, "output_per_m": 0.87},
+    {"id": "qwen3.5-397b-a17b", "label": "Qwen 3.5 397B", "provider": "Alibaba", "context": 131072, "api": "chat", "input_per_m": 0.55, "output_per_m": 3.50, "timeout_s": 60},
+    {"id": "glm-5.3-flash", "label": "GLM-5.3 Flash", "provider": "Z.ai", "context": 1048576, "api": "chat", "input_per_m": 0.15, "output_per_m": 0.50},
+    {"id": "kimi-k2.6", "label": "Kimi K2.6", "provider": "Moonshot AI", "context": 262144, "api": "chat", "input_per_m": 0.95, "output_per_m": 4.00, "timeout_s": 60}
+  ],
+  "mock_models": [
+    {"id": "mock-fast", "label": "Mock Fast", "provider": "Demo", "context": 8000, "api": "mock", "input_per_m": 0.10, "output_per_m": 0.40, "mock": {"first_token_ms": 150, "tokens_per_s": 120}},
+    {"id": "mock-balanced", "label": "Mock Balanced", "provider": "Demo", "context": 32000, "api": "mock", "input_per_m": 0.50, "output_per_m": 1.50, "mock": {"first_token_ms": 400, "tokens_per_s": 60}},
+    {"id": "mock-thorough", "label": "Mock Thorough", "provider": "Demo", "context": 128000, "api": "mock", "input_per_m": 3.00, "output_per_m": 12.00, "mock": {"first_token_ms": 900, "tokens_per_s": 30, "verbose": 2}},
+    {"id": "mock-flaky", "label": "Mock Flaky (always errors)", "provider": "Demo", "context": 8000, "api": "mock", "input_per_m": 0.10, "output_per_m": 0.40, "mock": {"fail": "upstream_error"}},
+    {"id": "mock-hang", "label": "Mock Hang (times out)", "provider": "Demo", "context": 8000, "api": "mock", "input_per_m": 0.10, "output_per_m": 0.40, "timeout_s": 8, "first_token_timeout_s": 4, "mock": {"hang": true}}
+  ]
+}
