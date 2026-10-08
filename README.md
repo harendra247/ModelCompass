@@ -16,7 +16,7 @@ streaming, per-model failure, timeouts, cost, limits, Stop, Run again, export, t
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest -q                        # 29 tests, about 7 s, no network, no key
+.venv/bin/python -m pytest -q                        # 42 tests, about 7 s, no network, no key
 .venv/bin/uvicorn app.main:app --port 8080           # open http://localhost:8080
 ```
 
@@ -28,10 +28,15 @@ What demo mode cannot prove: that the real endpoint accepts these model IDs, str
 When you get a key, run `scripts/smoke_live.py` first, then start the app with the key set.
 
 ```bash
-export DO_MODEL_ACCESS_KEY=...                       # live mode: real DigitalOcean inference
-.venv/bin/python scripts/smoke_live.py               # checks IDs exist, usage in stream, TTFT (costs a few cents)
-.venv/bin/uvicorn app.main:app --port 8080
+# Put the key in .env (git-ignored): DO_MODEL_ACCESS_KEY=...   The app loads .env itself (a real env var wins).
+.venv/bin/python scripts/smoke_live.py               # checks key, model IDs, usage in stream, TTFT (costs a few cents)
+.venv/bin/uvicorn app.main:app --port 8080           # startup log says: "mode": "live", "key_loaded": true
 ```
+
+If the badge says "Demo mode" with a key set, the key was not found: check the startup log line. If cards show
+"Request rejected (400)", the model rejected a parameter the app could not adapt: the message names it.
+The gateway already adapts once for `temperature`, `stream_options` and `max_tokens` vs `max_completion_tokens`,
+and the card shows "Adjusted for this model: ...".
 
 ## Docker
 
@@ -64,7 +69,7 @@ endpoint (no key in the build environment). The Dockerfile, compose file and App
 | Fan-out | One asyncio task per model; total time is the slowest model, not the sum (tested) |
 | Failure isolation | Each model ends as `success`, `error`, `timeout` or `rate_limited`; the others are unaffected (tested) |
 | Streaming | One multiplexed SSE stream; blocking JSON fallback with `?stream=false` |
-| Timeouts | Total deadline plus a shorter first-token deadline, both per-model config |
+| Timeouts | Stall-based: no first token in 20 s, or no output for 20 s mid-answer, ends the card with its partial text. A 120 s hard cap is only a backstop. All per-model config / env (`FIRST_TOKEN_TIMEOUT_S`, `IDLE_TIMEOUT_S`, `MODEL_TIMEOUT_S`) |
 | Retries | One jittered retry on 429 and 5xx, only before any output, honouring `Retry-After` |
 | Metrics | Latency, time to first token, input and output tokens (per model), estimated cost |
 | Cost | Price table in `app/models.json`, with source URL and as-of date; shown as an estimate |
@@ -119,7 +124,7 @@ of users are in the PRD.
 - Streaming usage: if the API sends no usage block, tokens are estimated at ~4 characters per token and marked `~`.
 - The "thinking" status relies on the model sending `reasoning_content` or `reasoning` deltas. Time to first token measures the first visible answer text, so reasoning models look slower by design.
 - Prompts of 8,000 characters or fewer, output capped at 2,000 tokens, text only.
-- A 30 s total deadline (60 s for a few slower models) can cut off very long answers. The card then shows the partial text with a timeout status.
+- Timeouts are about silence, not total time: a slow model that keeps streaming is allowed to finish (up to the 120 s hard cap). A call that stalls keeps its partial text, shows an estimated token count and cost (marked `~`), and counts toward the spend ceiling. Answers cut off by the max-output-tokens setting are labelled on the card.
 
 ## Layout
 
@@ -132,5 +137,5 @@ app/config.py    settings and model registry
 app/models.json  allowlist, prices, as-of date
 app/static/      single-page UI (served by the same container)
 Dockerfile, docker-compose.yml, .env.example, .gitignore, .dockerignore, .do/app.yaml
-tests/           29 tests: parallelism, isolation, timeouts, cancellation, adapter parsing, limits
+tests/           42 tests: parallelism, isolation, timeouts, cancellation, adapter parsing, limits
 ```

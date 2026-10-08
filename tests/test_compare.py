@@ -79,7 +79,7 @@ def test_first_token_timeout_and_total_timeout():
     events = asyncio.run(collect(cfgs))
     errs = {e["model"]: e for e in by_model(events, "error")}
     assert errs["slow-start"]["status"] == "timeout" and "No response started" in errs["slow-start"]["error"]
-    assert errs["too-long"]["status"] == "timeout" and "finish" in errs["too-long"]["error"]
+    assert errs["too-long"]["status"] == "timeout" and "time limit" in errs["too-long"]["error"]
     assert errs["too-long"]["chars"] > 0  # partial output is kept
     assert {e["model"] for e in by_model(events, "done")} == {"fine"}
 
@@ -335,3 +335,142 @@ def test_credentials_never_appear_in_responses():
         base_url="https://x.test", transport=httpx.MockTransport(lambda r: httpx.Response(500, text="boom")))))))
     body = c.get("/api/v1/models").text + post(c, ["deepseek-v4.1-flash", "llama-4-maverick"]).text
     assert "sk-secret-123" not in body
+
+
+# ---------- .env loading (uvicorn does not read .env itself) ----------
+
+def test_dotenv_loader_parses_common_forms_and_real_env_wins(tmp_path, monkeypatch):
+    from app.config import load_dotenv
+    env = tmp_path / ".env"
+    env.write_text('# comment\n\nDO_X_PLAIN=abc\nexport DO_X_EXPORT = "quoted value"\nDO_X_SINGLE=\'s\'\n'
+                   'DO_X_TRAIL=val # note\nDO_X_KEEP=from_file\nDO_X_EMPTY=\n﻿not a pair\n')
+    for k in ("DO_X_PLAIN", "DO_X_EXPORT", "DO_X_SINGLE", "DO_X_TRAIL", "DO_X_EMPTY"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("DO_X_KEEP", "from_real_env")
+    assert load_dotenv([env, tmp_path / "missing.env"]) == [env]
+    import os
+    assert (os.environ["DO_X_PLAIN"], os.environ["DO_X_EXPORT"], os.environ["DO_X_SINGLE"]) == ("abc", "quoted value", "s")
+    assert os.environ["DO_X_TRAIL"] == "val" and os.environ["DO_X_EMPTY"] == ""
+    assert os.environ["DO_X_KEEP"] == "from_real_env"
+    for k in ("DO_X_PLAIN", "DO_X_EXPORT", "DO_X_SINGLE", "DO_X_TRAIL", "DO_X_EMPTY"):
+        monkeypatch.delenv(k, raising=False)
+
+
+def test_key_from_env_is_stripped_and_blank_means_demo(monkeypatch):
+    monkeypatch.setenv("DO_MODEL_ACCESS_KEY", "  sk-abc \n")
+    assert Settings().access_key == "sk-abc" and not Settings().mock_mode
+    monkeypatch.setenv("DO_MODEL_ACCESS_KEY", "   ")
+    assert Settings().access_key is None and Settings().mock_mode
+
+
+# ---------- live-path hardening: models that reject parameters ----------
+
+def test_400_naming_a_parameter_is_adapted_and_reported():
+    sent = []
+
+    def handler(req):
+        body = json.loads(req.content)
+        sent.append(sorted(body))
+        if "stream_options" in body:
+            return httpx.Response(400, text='{"error":"Unknown parameter: stream_options"}')
+        if "temperature" in body:
+            return httpx.Response(400, text='{"error":"temperature is not supported with this model"}')
+        if "max_tokens" in body:
+            return httpx.Response(400, text="max_tokens is not supported, use max_completion_tokens")
+        return httpx.Response(200, text=sse_body({"choices": [{"delta": {"content": "ok"}}]}))
+
+    events = asyncio.run(run_live(handler))
+    done = by_model(events, "done")[0]
+    assert len(sent) == 4 and "max_completion_tokens" in sent[-1]
+    assert set(done["adjusted"]) == {"no usage block requested", "temperature not sent", "max_completion_tokens used"}
+    assert done["tokens_approximate"] is True  # no usage requested, so estimated and marked
+
+
+def test_400_that_cannot_be_adapted_fails_the_card_without_looping():
+    calls = []
+
+    def handler(req):
+        calls.append(1)
+        return httpx.Response(400, text="invalid request: messages too long")
+
+    err = by_model(asyncio.run(run_live(handler)), "error")[0]
+    assert len(calls) == 1 and err["status"] == "error" and "400" in err["error"]
+
+
+def test_repeated_400_about_same_parameter_stops():
+    calls = []
+
+    def handler(req):
+        calls.append(1)
+        return httpx.Response(400, text="temperature is invalid")  # says so even after we dropped it
+
+    err = by_model(asyncio.run(run_live(handler)), "error")[0]
+    assert len(calls) == 2 and err["status"] == "error"
+
+
+def test_auth_failure_is_reported_as_not_authorised():
+    def handler(req):
+        return httpx.Response(401, text="bad key")
+
+    err = by_model(asyncio.run(run_live(handler)), "error")[0]
+    assert "authorised" in err["error"] and "401" in err["error"]
+
+
+# ---------- model picker when the live catalog does not match the docs ----------
+
+def test_catalog_mismatch_falls_back_to_allowlist_instead_of_empty_picker():
+    s = settings(access_key="k")
+    gw = Gateway(s, do=DOAdapter(s, httpx.AsyncClient(base_url="https://x.test", transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"data": [{"id": "something-else"}]})))))
+    j = TestClient(create_app(s, Registry(), gw, Limiter(s))).get("/api/v1/models").json()
+    assert j["mode"] == "live" and j["catalog_verified"] is False and len(j["models"]) >= 2
+
+
+def test_catalog_match_filters_to_models_on_the_account():
+    s = settings(access_key="k")
+    ids = [{"id": "openai-gpt-oss-120b"}, {"id": "llama-4-maverick"}, {"id": "glm-5.3-flash"}, {"id": "not-in-allowlist"}]
+    gw = Gateway(s, do=DOAdapter(s, httpx.AsyncClient(base_url="https://x.test", transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"data": ids})))))
+    j = TestClient(create_app(s, Registry(), gw, Limiter(s))).get("/api/v1/models").json()
+    assert j["catalog_verified"] is True
+    assert sorted(m["id"] for m in j["models"]) == ["glm-5.3-flash", "llama-4-maverick", "openai-gpt-oss-120b"]
+
+
+# ---------- slow is not stuck: the timeouts that matter are stalls, not total time ----------
+
+def test_slow_but_steady_stream_finishes_even_if_longer_than_old_30s_style_deadline():
+    # ~1.4 s of steady output, a 0.3 s stall limit and a 5 s hard cap: must succeed (a flat 0.5 s deadline would have killed it)
+    slow = mk("slow", idle_timeout_s=0.3, timeout_s=5, mock={"first_token_ms": 50, "tokens_per_s": 30})
+    events = asyncio.run(collect([slow, mk("fast")]))
+    assert {e["model"] for e in by_model(events, "done")} == {"slow", "fast"}
+    assert by_model(events, "done")[-1]["latency_ms"] > 500 or any(e["latency_ms"] > 500 for e in by_model(events, "done"))
+
+
+def test_stall_mid_answer_times_out_with_partial_text_and_estimated_cost():
+    stuck = mk("stuck", idle_timeout_s=0.3, timeout_s=10, mock={"first_token_ms": 10, "tokens_per_s": 300, "stall_after": 3})
+    events = asyncio.run(collect([stuck, mk("fine")]))
+    err = by_model(events, "error")[0]
+    assert err["status"] == "timeout" and "Stalled" in err["error"] and err["chars"] > 0
+    assert err["tokens_approximate"] is True and err["output_tokens"] >= 0 and err["est_cost_usd"] is not None
+    assert "".join(e["text"] for e in by_model(events, "delta") if e["model"] == "stuck")  # partial answer was streamed
+    assert {e["model"] for e in by_model(events, "done")} == {"fine"}
+
+
+def test_hard_cap_still_stops_a_stream_that_never_ends():
+    endless = mk("endless", idle_timeout_s=1, timeout_s=0.4, mock={"first_token_ms": 10, "tokens_per_s": 20})
+    err = by_model(asyncio.run(collect([endless, mk("fine")])), "error")[0]
+    assert err["status"] == "timeout" and "time limit" in err["error"]
+
+
+def test_default_limits_are_stall_based_with_a_high_hard_cap():
+    s = Settings(access_key=None)
+    assert s.default_timeout_s >= 120 and s.default_idle_timeout_s <= 30 and s.default_first_token_timeout_s <= 30
+
+
+def test_finish_reason_length_is_reported_so_the_ui_can_say_the_answer_was_cut_off():
+    def handler(req):
+        return httpx.Response(200, text=sse_body({"choices": [{"delta": {"content": "partial"}}]},
+                                                 {"choices": [{"delta": {}, "finish_reason": "length"}]},
+                                                 {"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 800}}))
+
+    assert by_model(asyncio.run(run_live(handler)), "done")[0]["finish_reason"] == "length"

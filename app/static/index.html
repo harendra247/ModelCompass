@@ -73,6 +73,9 @@
   .body pre { background:var(--code); padding:10px; border-radius:8px; overflow:auto; font-size:13px; }
   .body code { background:var(--code); padding:1px 4px; border-radius:4px; font-size:.92em; }
   .body pre code { background:none; padding:0; }
+  .body table { border-collapse:collapse; font-size:13px; display:block; overflow-x:auto; max-width:100%; margin:8px 0; }
+  .body th, .body td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; overflow-wrap:normal; word-break:normal; min-width:90px; }
+  .body th { background:var(--code); }
   .errmsg { color:var(--err); font-size:13px; margin-bottom:8px; }
   .waiting { color:var(--muted); font-style:italic; }
   .metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:6px 10px; padding:10px 12px; border-top:1px solid var(--line); font-size:13px; }
@@ -249,6 +252,10 @@ async function start(inputs) {
     }
     await readStream(res, run);
     run.status = "done";
+    const all = Object.values(run.results);
+    if (all.length && all.every((r) => r.status === "error" && /authoris|\(401\)|\(403\)/i.test(r.error || ""))) {
+      notice("The inference API rejected the model access key. Check DO_MODEL_ACCESS_KEY (it must be a Serverless Inference model access key) and restart the app.");
+    }
     if (inputs.diffs) await loadSummary(run);
   } catch (e) {
     if (e.name === "AbortError") {
@@ -397,6 +404,8 @@ function card(run, id) {
      ["Est. cost", fmtCost(r.est_cost_usd)]].forEach(([k, v]) => m.append(el("div", {}, el("span", { class: "k", text: k }), el("span", { text: v }))));
     c.append(m);
   }
+  if (r.finish_reason === "length") c.append(el("div", { class: "hint", style: "padding:0 12px 8px", text: `Cut off at the max output tokens limit (${run.inputs.parameters.max_tokens}). Raise it under "System prompt and parameters" to see the full answer.` }));
+  if (r.adjusted && r.adjusted.length) c.append(el("div", { class: "hint", style: "padding:0 12px 8px", text: "Adjusted for this model: " + r.adjusted.join(", ") + "." }));
   if (st === "success") {
     const pick = el("button", { text: run.picked === id ? "Preferred" : "Prefer this one", "aria-pressed": String(run.picked === id) });
     pick.addEventListener("click", () => prefer(run, id));

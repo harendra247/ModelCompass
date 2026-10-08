@@ -70,6 +70,9 @@ def create_app(settings: Settings | None = None, registry: Registry | None = Non
     app = FastAPI(title="Multi-model comparison PoC")
     app.state.limiter, app.state.picks, app.state.settings, app.state.registry = limiter, picks, settings, registry
 
+    log.info(json.dumps({"event": "startup", "mode": "mock" if settings.mock_mode else "live",
+                         "key_loaded": bool(settings.access_key), "base_url": settings.base_url}))
+
     def active_models():
         return registry.for_mode(settings.mock_mode)
 
@@ -86,7 +89,11 @@ def create_app(settings: Settings | None = None, registry: Registry | None = Non
             live = await gateway.live_catalog()
             catalog_verified = live is not None
             if live is not None:
-                items = [m for m in items if m.id in live]
+                matched = [m for m in items if m.id in live]
+                if len(matched) >= settings.min_models:
+                    items = matched
+                else:  # IDs in the docs do not match this account's catalog: show the allowlist, flag it, never leave an empty picker
+                    catalog_verified = False
         defaults = [d for d in registry.default_ids if d in {m.id for m in items}] if not settings.mock_mode \
             else ["mock-fast", "mock-balanced", "mock-thorough"]
         return {
@@ -133,7 +140,7 @@ def create_app(settings: Settings | None = None, registry: Registry | None = Non
         async def source():
             try:
                 async for evt in events:
-                    if evt["event"] == "done":
+                    if evt["event"] in ("done", "error"):
                         limiter.add_spend(evt.get("est_cost_usd"))
                     yield evt
             finally:

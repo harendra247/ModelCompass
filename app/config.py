@@ -9,6 +9,39 @@ from pathlib import Path
 _HERE = Path(__file__).parent
 
 
+def load_dotenv(paths: list[Path] | None = None) -> list[Path]:
+    """Minimal .env loader (no extra dependency). Real environment variables always win.
+
+    `uvicorn` does not read .env by itself; only `docker compose` does. Without this, a key saved in
+    .env is silently ignored and the app falls back to demo mode.
+    """
+    loaded = []
+    for path in paths if paths is not None else [_HERE.parent / ".env", Path.cwd() / ".env"]:
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except OSError:
+            continue
+        loaded.append(path)
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[7:].lstrip()
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            elif " #" in value:  # trailing comment on an unquoted value
+                value = value.split(" #", 1)[0].rstrip()
+            if key and key not in os.environ:
+                os.environ[key] = value
+    return loaded
+
+
+load_dotenv()
+
+
 @dataclass(frozen=True)
 class ModelCfg:
     id: str
@@ -21,6 +54,7 @@ class ModelCfg:
     max_tokens_param: str = "max_tokens"
     timeout_s: float | None = None
     first_token_timeout_s: float | None = None
+    idle_timeout_s: float | None = None
     mock: dict = field(default_factory=dict)
 
     def public(self, as_of: str) -> dict:
@@ -41,7 +75,7 @@ def _env_int(name: str, default: int) -> int:
 
 @dataclass
 class Settings:
-    access_key: str | None = field(default_factory=lambda: os.environ.get("DO_MODEL_ACCESS_KEY") or None)
+    access_key: str | None = field(default_factory=lambda: (os.environ.get("DO_MODEL_ACCESS_KEY") or "").strip() or None)
     base_url: str = field(default_factory=lambda: os.environ.get("DO_INFERENCE_BASE_URL", "https://inference.do-ai.run"))
     mock_speed: float = field(default_factory=lambda: _env_float("MOCK_SPEED", 1))
     force_mock: bool = field(default_factory=lambda: os.environ.get("MOCK_MODE") == "1")
@@ -49,8 +83,11 @@ class Settings:
     max_models: int = field(default_factory=lambda: _env_int("MAX_MODELS", 4))
     max_prompt_chars: int = field(default_factory=lambda: _env_int("MAX_PROMPT_CHARS", 8000))
     max_output_tokens_cap: int = field(default_factory=lambda: _env_int("MAX_OUTPUT_TOKENS_CAP", 2000))
-    default_timeout_s: float = field(default_factory=lambda: _env_float("MODEL_TIMEOUT_S", 30))
-    default_first_token_timeout_s: float = field(default_factory=lambda: _env_float("FIRST_TOKEN_TIMEOUT_S", 15))
+    # A slow model is not a stuck model: the real guards are "no first token" and "stalled mid-answer".
+    # The hard cap only exists so nothing runs forever; output length is already bounded by max_tokens.
+    default_timeout_s: float = field(default_factory=lambda: _env_float("MODEL_TIMEOUT_S", 120))
+    default_first_token_timeout_s: float = field(default_factory=lambda: _env_float("FIRST_TOKEN_TIMEOUT_S", 20))
+    default_idle_timeout_s: float = field(default_factory=lambda: _env_float("IDLE_TIMEOUT_S", 20))
     compares_per_hour: int = field(default_factory=lambda: _env_int("COMPARES_PER_HOUR", 10))
     concurrent_per_ip: int = field(default_factory=lambda: _env_int("CONCURRENT_PER_IP", 2))
     daily_spend_ceiling_usd: float = field(default_factory=lambda: _env_float("DAILY_SPEND_CEILING_USD", 5.0))

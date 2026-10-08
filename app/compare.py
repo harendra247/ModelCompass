@@ -23,17 +23,23 @@ def est_cost(cfg: ModelCfg, input_tokens: int | None, output_tokens: int | None)
     return round((input_tokens * cfg.input_per_m + output_tokens * cfg.output_per_m) / 1_000_000, 6)
 
 
-class FirstTokenTimeout(Exception):
-    pass
+class Stalled(Exception):
+    """No output for too long. `first` is True when the answer never started."""
+
+    def __init__(self, first: bool):
+        self.first = first
 
 
 async def run_model(cfg: ModelCfg, gateway: Gateway, settings: Settings, system: str | None, prompt: str,
                     params: dict, emit: Callable, request_id: str) -> None:
-    total_s = cfg.timeout_s or settings.default_timeout_s
+    total_s = cfg.timeout_s or settings.default_timeout_s          # hard cap, rarely the reason a call ends
     first_s = cfg.first_token_timeout_s or settings.default_first_token_timeout_s
+    idle_s = cfg.idle_timeout_s or settings.default_idle_timeout_s
     t0 = time.perf_counter()
     ms = lambda: int((time.perf_counter() - t0) * 1000)  # noqa: E731
     chars, ttft, usage, saw_thinking, got_any = 0, None, None, False, False
+    adjusted: list[str] = []
+    finish_reason = None
     status, error = "success", None
     agen = None
     await emit({"event": "status", "model": cfg.id, "status": "running"})
@@ -43,15 +49,13 @@ async def run_model(cfg: ModelCfg, gateway: Gateway, settings: Settings, system:
             it = agen.__aiter__()
             while True:
                 try:
-                    if got_any:
-                        chunk = await it.__anext__()
-                    else:
-                        try:
-                            chunk = await asyncio.wait_for(it.__anext__(), first_s)
-                        except asyncio.TimeoutError:
-                            raise FirstTokenTimeout()
+                    # every wait is bounded: a stream that keeps producing output never trips this,
+                    # a stream that goes quiet for idle_s (or never starts for first_s) does
+                    chunk = await asyncio.wait_for(it.__anext__(), idle_s if got_any else first_s)
                 except StopAsyncIteration:
                     break
+                except asyncio.TimeoutError:
+                    raise Stalled(first=not got_any)
                 got_any = True
                 if chunk["type"] == "delta":
                     if ttft is None:
@@ -63,10 +67,16 @@ async def run_model(cfg: ModelCfg, gateway: Gateway, settings: Settings, system:
                     await emit({"event": "status", "model": cfg.id, "status": "thinking"})
                 elif chunk["type"] == "usage":
                     usage = chunk
-    except FirstTokenTimeout:
-        status, error = "timeout", f"No response started within {first_s:g}s"
+                elif chunk["type"] == "adjusted":
+                    adjusted = chunk["changes"]
+                elif chunk["type"] == "finish":
+                    finish_reason = chunk["reason"]
+    except Stalled as exc:
+        status = "timeout"
+        error = (f"No response started within {first_s:g}s" if exc.first
+                 else f"Stalled: no output for {idle_s:g}s (partial answer kept)")
     except TimeoutError:
-        status, error = "timeout", f"Did not finish within {total_s:g}s"
+        status, error = "timeout", f"Stopped at the {total_s:g}s time limit (partial answer kept)"
     except UpstreamError as exc:
         status = "rate_limited" if exc.kind == "rate_limited" else "error"
         error = exc.message
@@ -92,10 +102,15 @@ async def run_model(cfg: ModelCfg, gateway: Gateway, settings: Settings, system:
             out_tok = chars // 4
         evt = {"event": "done", "model": cfg.id, "status": "success", "latency_ms": latency, "ttft_ms": ttft,
                "input_tokens": in_tok, "output_tokens": out_tok, "tokens_approximate": approx,
-               "chars": chars, "est_cost_usd": est_cost(cfg, in_tok, out_tok)}
+               "chars": chars, "est_cost_usd": est_cost(cfg, in_tok, out_tok), "adjusted": adjusted,
+               "finish_reason": finish_reason}
     else:
         evt = {"event": "error", "model": cfg.id, "status": status, "error": error,
                "latency_ms": latency, "ttft_ms": ttft, "chars": chars}
+        if chars:  # a partial answer still cost something: estimate it and say so
+            in_tok, out_tok = (len(prompt) + len(system or "")) // 4, chars // 4
+            evt.update({"input_tokens": in_tok, "output_tokens": out_tok, "tokens_approximate": True,
+                        "est_cost_usd": est_cost(cfg, in_tok, out_tok)})
     # metadata only: never log prompt or output text
     log.info(json.dumps({"request_id": request_id, **{k: v for k, v in evt.items() if k != "event"},
                          "event": "model_result"}))

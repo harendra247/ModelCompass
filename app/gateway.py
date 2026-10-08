@@ -22,12 +22,14 @@ from .config import ModelCfg, Settings
 class UpstreamError(Exception):
     """kind is one of: error, rate_limited, auth."""
 
-    def __init__(self, kind: str, message: str, http_status: int | None = None, retry_after: float | None = None):
+    def __init__(self, kind: str, message: str, http_status: int | None = None, retry_after: float | None = None,
+                 detail: str = ""):
         super().__init__(message)
         self.kind = kind
         self.message = message
         self.http_status = http_status
         self.retry_after = retry_after
+        self.detail = detail.lower()  # raw upstream error text, used only to adapt the request
 
 
 def _classify_http(status: int, body: str, retry_after: str | None) -> UpstreamError:
@@ -44,7 +46,7 @@ def _classify_http(status: int, body: str, retry_after: str | None) -> UpstreamE
         return UpstreamError("error", f"Model not found or not enabled for this account (404) {snippet}", status)
     if status >= 500:
         return UpstreamError("error", f"Upstream server error ({status}) {snippet}", status)
-    return UpstreamError("error", f"Request rejected ({status}) {snippet}", status)
+    return UpstreamError("error", f"Request rejected ({status}) {snippet}", status, detail=body)
 
 
 class DOAdapter:
@@ -78,12 +80,16 @@ class DOAdapter:
             payload["temperature"] = params["temperature"]
 
         started = False
-        for attempt in (0, 1):
+        retried = False
+        adjustments: list[str] = []
+        while True:
             try:
                 async with self.client.stream("POST", "/v1/chat/completions", json=payload, headers=self._headers()) as resp:
                     if resp.status_code != 200:
                         body = (await resp.aread()).decode("utf-8", "replace")
                         raise _classify_http(resp.status_code, body, resp.headers.get("retry-after"))
+                    if adjustments:
+                        yield {"type": "adjusted", "changes": list(adjustments)}
                     async for line in resp.aiter_lines():
                         if not line.startswith("data:"):
                             continue
@@ -97,6 +103,8 @@ class DOAdapter:
                         if "error" in obj:
                             raise UpstreamError("error", f"Upstream error: {str(obj['error'])[:200]}")
                         for choice in obj.get("choices") or []:
+                            if choice.get("finish_reason"):
+                                yield {"type": "finish", "reason": choice["finish_reason"]}
                             delta = choice.get("delta") or {}
                             if delta.get("content"):
                                 started = True
@@ -110,17 +118,40 @@ class DOAdapter:
                                    "output_tokens": usage.get("completion_tokens")}
                     return
             except UpstreamError as exc:
+                # Models differ in which parameters they accept. On a 400 that names one, drop or rename it and
+                # try again (at most 3 times, before any output), and tell the UI what was changed.
+                if exc.http_status == 400 and not started and len(adjustments) < 3:
+                    change = _adapt_payload(payload, exc.detail)
+                    if change:
+                        adjustments.append(change)
+                        continue
                 retryable = exc.kind == "rate_limited" or (exc.http_status or 0) >= 500
-                if attempt == 0 and retryable and not started:
-                    # one retry, only before any output, honouring Retry-After but never waiting long
-                    wait = min(exc.retry_after or 0.5, 3.0) + random.uniform(0, 0.25)
-                    await asyncio.sleep(wait)
+                if not retried and retryable and not started:
+                    retried = True  # one retry, only before any output; honour Retry-After but never wait long
+                    await asyncio.sleep(min(exc.retry_after or 0.5, 3.0) + random.uniform(0, 0.25))
                     continue
                 raise
             except httpx.ConnectError as exc:
                 raise UpstreamError("error", f"Could not reach the inference API: {exc}") from exc
             except httpx.HTTPError as exc:
                 raise UpstreamError("error", f"Network error: {type(exc).__name__}") from exc
+
+
+def _adapt_payload(payload: dict, detail: str) -> str | None:
+    """Fix the request in place based on a 400 message. Returns a short description, or None if nothing applies."""
+    if "stream_options" in payload and "stream_options" in detail:
+        del payload["stream_options"]
+        return "no usage block requested"
+    if "temperature" in payload and "temperature" in detail:
+        del payload["temperature"]
+        return "temperature not sent"
+    if "max_tokens" in payload and "max_tokens" in detail:
+        payload["max_completion_tokens"] = payload.pop("max_tokens")
+        return "max_completion_tokens used"
+    if "max_completion_tokens" in payload and "max_completion_tokens" in detail:
+        payload["max_tokens"] = payload.pop("max_completion_tokens")
+        return "max_tokens used"
+    return None
 
 
 _MOCK_PARAGRAPHS = [
@@ -154,9 +185,13 @@ class MockAdapter:
             words = body.split(" ")
             tps = max(1.0, float(m.get("tokens_per_s", 60)))
             step = 3
-            for i in range(0, len(words), step):
+            stall_after = m.get("stall_after")
+            for n, i in enumerate(range(0, len(words), step)):
+                if stall_after is not None and n >= stall_after:
+                    await asyncio.sleep(3600)  # goes silent mid-answer
                 await asyncio.sleep(step / tps / self.speed)
                 yield {"type": "delta", "text": " ".join(words[i:i + step]) + " "}
+            yield {"type": "finish", "reason": "stop"}
             # tokenizers differ, so give each mock model its own chars-per-token ratio
             ratio = 3.2 + (sum(ord(c) for c in cfg.id) % 10) / 10
             yield {"type": "usage",
