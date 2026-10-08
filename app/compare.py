@@ -103,7 +103,7 @@ async def run_model(cfg: ModelCfg, gateway: Gateway, settings: Settings, system:
         evt = {"event": "done", "model": cfg.id, "status": "success", "latency_ms": latency, "ttft_ms": ttft,
                "input_tokens": in_tok, "output_tokens": out_tok, "tokens_approximate": approx,
                "chars": chars, "est_cost_usd": est_cost(cfg, in_tok, out_tok), "adjusted": adjusted,
-               "finish_reason": finish_reason}
+               "finish_reason": finish_reason, "reasoned": saw_thinking}
     else:
         evt = {"event": "error", "model": cfg.id, "status": status, "error": error,
                "latency_ms": latency, "ttft_ms": ttft, "chars": chars}

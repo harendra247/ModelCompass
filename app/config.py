@@ -82,7 +82,7 @@ class Settings:
     min_models: int = 2
     max_models: int = field(default_factory=lambda: _env_int("MAX_MODELS", 4))
     max_prompt_chars: int = field(default_factory=lambda: _env_int("MAX_PROMPT_CHARS", 8000))
-    max_output_tokens_cap: int = field(default_factory=lambda: _env_int("MAX_OUTPUT_TOKENS_CAP", 2000))
+    max_output_tokens_cap: int = field(default_factory=lambda: _env_int("MAX_OUTPUT_TOKENS_CAP", 4000))
     # A slow model is not a stuck model: the real guards are "no first token" and "stalled mid-answer".
     # The hard cap only exists so nothing runs forever; output length is already bounded by max_tokens.
     default_timeout_s: float = field(default_factory=lambda: _env_float("MODEL_TIMEOUT_S", 120))

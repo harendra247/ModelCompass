@@ -23,7 +23,7 @@ log = logging.getLogger("api")
 
 class Params(BaseModel):
     temperature: float | None = Field(0.7, ge=0, le=2)
-    max_tokens: int = Field(800, ge=16)
+    max_tokens: int = Field(1500, ge=16)
 
 
 class CompareReq(BaseModel):

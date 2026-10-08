@@ -104,7 +104,7 @@
       <textarea id="system" style="min-height:60px" placeholder="You are a concise senior engineer."></textarea>
       <div class="row" style="margin-top:10px">
         <div><label class="f" for="temp">Temperature</label><input id="temp" type="number" min="0" max="2" step="0.1" value="0.7" style="width:110px"></div>
-        <div><label class="f" for="maxtok">Max output tokens</label><input id="maxtok" type="number" min="16" step="50" value="800" style="width:130px"></div>
+        <div><label class="f" for="maxtok">Max output tokens</label><input id="maxtok" type="number" min="16" step="50" value="1500" style="width:130px"></div>
         <div class="hint">Same values go to every model. Some models clamp or ignore them.</div>
       </div>
     </details>
@@ -148,6 +148,8 @@ const store = {
 
 const fmtMs = (ms) => ms == null ? "-" : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`;
 const fmtCost = (c) => c == null ? "n/a" : c < 0.0001 ? "<$0.0001" : `$${c.toFixed(4)}`;
+const tps = (r) => (r.output_tokens != null && r.latency_ms > 0) ? r.output_tokens / (r.latency_ms / 1000) : null;
+const fmtTps = (r) => tps(r) == null ? "-" : `${r.tokens_approximate ? "~" : ""}${tps(r).toFixed(0)}`;
 const fmtTok = (n, approx) => n == null ? "-" : `${approx ? "~" : ""}${n}`;
 const label = (id) => (state.models[id] && state.models[id].label) || id;
 
@@ -353,6 +355,7 @@ function button(text, fn) { const b = el("button", { text }); b.addEventListener
 function headline(run) {
   const ok = Object.entries(run.results).filter(([, r]) => r.status === "success");
   if (ok.length < 2) return null;
+  ok.forEach(([, r]) => { r.tps = tps(r); });
   const best = (key, dir = 1, filter = () => true) => {
     const c = ok.filter(([, r]) => r[key] != null && filter(r));
     return c.length ? c.reduce((a, b) => (dir * (b[1][key] - a[1][key]) < 0 ? b : a))[0] : null;
@@ -360,6 +363,7 @@ function headline(run) {
   const items = [
     ["Fastest to first token", best("ttft_ms"), (id) => fmtMs(run.results[id].ttft_ms)],
     ["Fastest to finish", best("latency_ms"), (id) => fmtMs(run.results[id].latency_ms)],
+    ["Highest tokens/s", best("tps"), (id) => `${fmtTps(run.results[id])} tok/s`],
     ["Cheapest (estimate)", best("est_cost_usd"), (id) => fmtCost(run.results[id].est_cost_usd)],
     ["Longest answer", best("chars", -1), (id) => `${run.results[id].chars} chars`],
   ].filter((x) => x[1]);
@@ -401,10 +405,11 @@ function card(run, id) {
     const m = el("div", { class: "metrics" });
     [["Finish", fmtMs(r.latency_ms)], ["First token", fmtMs(r.ttft_ms)],
      ["Input tokens", fmtTok(r.input_tokens, r.tokens_approximate)], ["Output tokens", fmtTok(r.output_tokens, r.tokens_approximate)],
-     ["Est. cost", fmtCost(r.est_cost_usd)]].forEach(([k, v]) => m.append(el("div", {}, el("span", { class: "k", text: k }), el("span", { text: v }))));
+     ["Tokens/s", fmtTps(r)], ["Est. cost", fmtCost(r.est_cost_usd)]].forEach(([k, v]) => m.append(el("div", {}, el("span", { class: "k", text: k }), el("span", { text: v }))));
     c.append(m);
   }
   if (r.finish_reason === "length") c.append(el("div", { class: "hint", style: "padding:0 12px 8px", text: `Cut off at the max output tokens limit (${run.inputs.parameters.max_tokens}). Raise it under "System prompt and parameters" to see the full answer.` }));
+  if (st === "success" && r.reasoned) c.append(el("div", { class: "hint", style: "padding:0 12px 8px", text: "This model reasoned before answering, so its first visible word came late. Reasoning tokens count toward output tokens, cost and the token limit." }));
   if (r.adjusted && r.adjusted.length) c.append(el("div", { class: "hint", style: "padding:0 12px 8px", text: "Adjusted for this model: " + r.adjusted.join(", ") + "." }));
   if (st === "success") {
     const pick = el("button", { text: run.picked === id ? "Preferred" : "Prefer this one", "aria-pressed": String(run.picked === id) });

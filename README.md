@@ -123,7 +123,7 @@ of users are in the PRD.
 - Not verified against the live endpoint (see above). IDs and prices were read from DigitalOcean docs on 2026-10-08.
 - Streaming usage: if the API sends no usage block, tokens are estimated at ~4 characters per token and marked `~`.
 - The "thinking" status relies on the model sending `reasoning_content` or `reasoning` deltas. Time to first token measures the first visible answer text, so reasoning models look slower by design.
-- Prompts of 8,000 characters or fewer, output capped at 2,000 tokens, text only.
+- Prompts of 8,000 characters or fewer, output capped at 4,000 tokens (default request 1,500), text only.
 - Timeouts are about silence, not total time: a slow model that keeps streaming is allowed to finish (up to the 120 s hard cap). A call that stalls keeps its partial text, shows an estimated token count and cost (marked `~`), and counts toward the spend ceiling. Answers cut off by the max-output-tokens setting are labelled on the card.
 
 ## Layout
